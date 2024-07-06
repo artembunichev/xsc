@@ -3,14 +3,10 @@ reads stdin and makes it an X CLIPBOARD selection.
 deps:libX11.
 build:cc -o xsc xsc.c -lX11
 */
-#include <stdio.h>
-#include <stdlib.h>
-#include <unistd.h>
-#include <sys/types.h>
-#include <string.h>
 #include <X11/Xlib.h>
-
-#define BUFLEN 4096
+#include <unistd.h>
+#include <stdlib.h>
+#include<string.h>
 
 static Atom CLIPATM;
 static Atom STRATM;
@@ -20,6 +16,7 @@ static Atom TXTATM;
 static Atom TRGTSATM;
 
 static unsigned char* DATA=NULL;
+static int inlen=0;//input(DATA) length.
 
 //obtain atoms.
 void
@@ -50,23 +47,6 @@ selntf(XSelectionRequestEvent* srev,Atom prop)
 	XSendEvent(srev->display,srev->requestor,False,NoEventMask,(XEvent*)&snev);
 };
 
-//selection targets reply.
-void
-seltrgtsrpl(XSelectionRequestEvent* srev)
-{
-	Atom trgts[]={UTF8STRATM,XSTRATM,STRATM,TXTATM};
-	XChangeProperty(srev->display,srev->requestor,srev->property,srev->target,32,PropModeReplace,(unsigned char*)trgts,(int)(sizeof(trgts)/sizeof(Atom)));
-	selntf(srev,srev->property);
-};
-
-//selection reply.
-void
-selrpl(XSelectionRequestEvent* srev,unsigned char* data)
-{
-	XChangeProperty(srev->display,srev->requestor,srev->property,srev->target,8,PropModeReplace,data,strlen(data));
-	selntf(srev,srev->property);
-};
-
 //selection deny.
 void
 seldeny(XSelectionRequestEvent* srev)
@@ -88,7 +68,7 @@ wrun(void)
 	Display* dpl=XOpenDisplay(NULL);
 	if(dpl==NULL)
 	{
-		dprintf(2,"err: cannot open a display.\n");
+		write(2,"display open err.\n",18);
 		exit(1);
 	}
 	obtatms(dpl);
@@ -112,14 +92,19 @@ wrun(void)
 					break;
 				}
 				if(srev->target==TRGTSATM)
-				{
-					seltrgtsrpl(srev);
+				{/*selection targets reply.*/
+				Atom trgts[]={UTF8STRATM,XSTRATM,STRATM,TXTATM};
+				XChangeProperty(srev->display,srev->requestor,srev->property,srev->target,
+				32,PropModeReplace,(unsigned char*)trgts,(int)(sizeof(trgts)/sizeof(Atom)));
+				selntf(srev,srev->property);
 					break;
 				}
 				else if((srev->target==STRATM)||(srev->target==XSTRATM)||(srev->target==UTF8STRATM)||(srev->target==TXTATM))
-				{
-					selrpl(srev,DATA);
-					break;
+				{/*selection reply*/
+				XChangeProperty(srev->display,srev->requestor,srev->property,srev->target,8,
+				PropModeReplace,DATA,inlen);
+				selntf(srev,srev->property);
+				break;
 				}
 				else
 				{
@@ -138,37 +123,37 @@ wrun(void)
 int
 main(void)
 {
-	char buf[BUFLEN];
-	int inlen=0;
+	char buf[4096];
 	char* in=NULL;
 	ssize_t rdr;
-	while((rdr=read(0,&buf,BUFLEN))>0)
+	/*fill input buffer*/
+	while((rdr=read(0,&buf,4096))>0)
 	{
 		buf[rdr]=0;
 		inlen+=rdr;
 		in=realloc(in,inlen);
 		if(in==NULL)
 		{
-			dprintf(2,"err: error during allocating memory for input.\n");
-			exit(1);
+			write(2,"realloc err.\n",13);
+			return 1;
 		}
 		strcat(in,buf);
 	};
 	DATA=in;
 	pid_t forkr=fork();
 	if(forkr==-1)
-	{
-		dprintf(2,"err: fork error.\n");
+	{/*fork error*/
+		write(2,"fork err.\n",10);
 		free(DATA);
-		exit(1);
+		return 1;
 	}
 	else if(forkr==0)
-	{
+	{/*child*/
 		wrun();
 	}
 	else
-	{
+	{/*terminate parent*/
 		free(DATA);
-		exit(0);
+		return 0;
 	}
 };
